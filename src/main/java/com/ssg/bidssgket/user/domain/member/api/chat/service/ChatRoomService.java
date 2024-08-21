@@ -27,6 +27,12 @@ public class ChatRoomService {
     private final MemberRepository memberRepository;
     private final ProductRepository productRepository;
 
+    // 기존 채팅방 조회 메소드 추가
+    public ChatRoom findByProductNo(Long productNo) {
+        return chatRoomRepository.findByProductNo(productNo)
+                .orElse(null); // 존재하지 않으면 null 반환
+    }
+
     public ChatRoom createRoom(Long productNo) {
         Product product = productRepository.findById(productNo)
                 .orElseThrow(() -> new ProductNotFoundException("Product not found with id: " + productNo));

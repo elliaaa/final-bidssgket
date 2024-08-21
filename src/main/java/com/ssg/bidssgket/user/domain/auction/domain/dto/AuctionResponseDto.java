@@ -29,8 +29,4 @@ public class AuctionResponseDto {
         this.member = member;
         this.product = product;
     }
-
-    public void updateTenderDeleted(boolean tenderDeleted) {
-        this.tenderDeleted = tenderDeleted;
-    }
 }

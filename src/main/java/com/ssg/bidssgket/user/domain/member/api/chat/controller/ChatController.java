@@ -6,10 +6,13 @@ import com.ssg.bidssgket.user.domain.member.api.chat.model.ChatRoomMember;
 import com.ssg.bidssgket.user.domain.member.api.chat.repository.ChatRoomMemberRepository;
 import com.ssg.bidssgket.user.domain.member.api.chat.repository.ChatRoomRepository;
 import com.ssg.bidssgket.user.domain.member.api.chat.service.ChatMessageService;
+import com.ssg.bidssgket.user.domain.member.api.chat.service.ChatRoomService;
 import com.ssg.bidssgket.user.domain.member.api.googleLogin.SessionMember;
 import com.ssg.bidssgket.user.domain.member.domain.Member;
 import com.ssg.bidssgket.user.domain.member.domain.repository.MemberRepository;
 import com.ssg.bidssgket.user.domain.member.view.DTO.ChatMessageDto;
+import com.ssg.bidssgket.user.domain.product.domain.Product;
+import com.ssg.bidssgket.user.domain.product.domain.repository.ProductRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.ResponseEntity;
@@ -29,18 +32,19 @@ import java.util.Optional;
 
 @Controller
 @RequiredArgsConstructor
-@RequestMapping("/chat")
+@RequestMapping("chat")
 public class ChatController {
 
     private final SimpMessagingTemplate messagingTemplate;
-    private final ChatRoomRepository chatRoomRepository;
-    private final ChatMessageService chatMessageService;
+    private final ChatRoomService chatRoomService;
     private final MemberRepository memberRepository;
+    private final ProductRepository productRepository;
     private final ChatRoomMemberRepository chatRoomMemberRepository;
+    private final ChatMessageService chatMessageService;
+    private final ChatRoomRepository chatRoomRepository;
 
     @GetMapping
-    public String getChatPage(Model model, HttpServletRequest request) { // 사용자의 채팅방 목록 조회
-
+    public String getChatPage(Model model, HttpServletRequest request) {
         SessionMember sessionMember = (SessionMember) request.getSession().getAttribute("member");
         Member member = memberRepository.findByEmail(sessionMember.getEmail()).orElseThrow();
 
@@ -58,7 +62,7 @@ public class ChatController {
     public String getMessagePage(@PathVariable Long chatRoomMemberNo, Model model, HttpServletRequest request) { // 각 채팅방별 내용 불러오기
         SessionMember sessionMember = (SessionMember) request.getSession().getAttribute("member");
         Member member = memberRepository.findByEmail(sessionMember.getEmail()).orElseThrow();
-        List<ChatRoomMember> chatRoomMembers = member.getChatRoomMembers();
+        List<ChatRoomMember> chatRoomMembers = member.getChatRoomMembers(); //현재 사용자가 속한 모든 채팅방 조회
 
         ChatRoomMember chatRoomMember = chatRoomMemberRepository.findById(chatRoomMemberNo).orElseThrow();
         ChatRoom chatRoom = chatRoomMember.getChatRoom();
@@ -79,61 +83,35 @@ public class ChatController {
         return "/user/member/chat";
     }
 
-    @GetMapping("/messages")
-    public ResponseEntity<List<ChatMessage>> getChatMessages(@RequestParam Long chatRoomNo) { // 특정 채팅방의 메세지 목록을 불러옴
-        List<ChatMessage> messages = chatMessageService.findMessagesByChatRoomNo(chatRoomNo);
-        return ResponseEntity.ok(messages);
-    }
+    @PostMapping("/start")
+    public String startChat(@RequestParam Long productNo, HttpServletRequest request) {
+        SessionMember sessionMember = (SessionMember) request.getSession().getAttribute("member");
+        Member currentUser = memberRepository.findByEmail(sessionMember.getEmail()).orElseThrow();
 
-    @PostMapping("/send")
-    public String saveMessage(@RequestParam Long chatRoomNo,
-                              @RequestParam Long memberNo,
-                              @RequestParam String message,
-                              @RequestParam(required = false) String imageUrl,
-                              Model model) {   // 전송된 메세지 저장
+        // 상품 조회
+        Product product = productRepository.findById(productNo)
+                .orElseThrow(() -> new IllegalArgumentException("Product not found with id: " + productNo));
 
-        // 채팅방과 회원 정보를 데이터베이스에서 조회
-        Optional<ChatRoom> chatRoomOpt = chatRoomRepository.findById(chatRoomNo);
-        Optional<Member> memberOpt = memberRepository.findById(memberNo);
+        // 기존 채팅방 조회
+        ChatRoom existingChatRoom = chatRoomService.findByProductNo(productNo);
 
-        if (chatRoomOpt.isEmpty() || memberOpt.isEmpty()) {
-            model.addAttribute("error", "채팅방이나 회원 정보가 올바르지 않습니다.");
-            return "error"; // 에러 페이지로 리디렉션
+        if (existingChatRoom != null) {
+            // 이미 존재하는 채팅방으로 리디렉션
+            return "redirect:/chat/" + existingChatRoom.getChatRoomNo();
         }
 
-        ChatRoom chatRoom = chatRoomOpt.get();
-        Member member = memberOpt.get();
+        // 채팅방 생성
+        ChatRoom newChatRoom = chatRoomService.createRoom(productNo);
 
-        // ChatMessage 객체 생성
-        ChatMessage chatMessage = ChatMessage.builder()
-                .chatRoom(chatRoom)
-                .member(member)
-                .message(message)
-                .imageUrl(imageUrl)
-                .sentAt(LocalDateTime.now())
-                .build();
+        // 판매자와 현재 사용자 채팅방에 추가
+        Long sellerId = product.getMember().getMemberNo();
+        Long currentUserId = currentUser.getMemberNo();
 
-        // 채팅 메시지 저장
-        chatMessageService.save(chatMessage);
+        chatRoomService.addMember(newChatRoom.getChatRoomNo(), sellerId);
+        chatRoomService.addMember(newChatRoom.getChatRoomNo(), currentUserId);
 
-        // 성공적인 응답 반환
-        model.addAttribute("successMessage", "메시지가 성공적으로 전송되었습니다.");
-        return "redirect:/chat"; // 채팅 페이지로 리디렉션
-    }
-
-    @MessageMapping("/chat.sendMessage")
-    @SendTo("/topic/{chatRoomNo}")
-    public ChatMessage handleMessage(@Payload ChatMessageDto chatMessageDto) {  // 메세지 전송
-        ChatMessage chatMessage = chatMessageService.createAndSaveChatMessage(chatMessageDto);
-        messagingTemplate.convertAndSend("/pro/" + chatMessage.getChatRoom().getChatRoomNo(), chatMessage);
-        return chatMessage;
-    }
-
-    @MessageMapping("/chat.addUser")
-    public void addUser(ChatMessage chatMessage, SimpMessageHeaderAccessor headerAccessor) {
-        // WebSocket 세션에 사용자 이름 저장
-        headerAccessor.getSessionAttributes().put("member", chatMessage.getSender());
-        messagingTemplate.convertAndSend("/pro/" + chatMessage.getChatRoom().getChatRoomNo(), chatMessage);
+        // 새로 생성된 채팅방으로 리디렉션
+        return "redirect:/chat/" + newChatRoom.getChatRoomNo();
     }
 
 }
