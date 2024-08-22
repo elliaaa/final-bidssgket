@@ -1,8 +1,10 @@
 package com.ssg.bidssgket.user.domain.member.view.DTO;
 
 import com.ssg.bidssgket.user.domain.member.domain.Wish;
-import com.ssg.bidssgket.user.domain.product.view.dto.response.ProductResDto;
-import lombok.*;
+import lombok.AccessLevel;
+import lombok.Builder;
+import lombok.Getter;
+import lombok.NoArgsConstructor;
 
 @Getter
 @NoArgsConstructor(access = AccessLevel.PROTECTED)
